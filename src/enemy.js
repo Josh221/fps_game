@@ -22,9 +22,15 @@
 // soldier walks to the foot (or the roof landing), slings his rifle and
 // climbs — taking turns if a friend is already on it. Climb up onto a roof
 // and he'll follow you up there; he can't shoot while his hands are full.
+//
+// GUNS: not everyone carries the same one. issueFor() rolls each soldier's
+// gun and spare magazines from his network id (config.js ENEMY_ISSUE), and he
+// fires it its own way: an LMG gunner in long bursts, a marksman a shot or two
+// at a time. When he's killed, what he carried is yours to take (loot.js).
 // =============================================================================
 import * as THREE from 'three';
-import { AI, DIFFICULTY } from './config.js';
+import { AI, DIFFICULTY, ENEMY_ISSUE } from './config.js';
+import { mulberry32 } from './textures.js';
 
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _eye = new THREE.Vector3(), _threatEye = new THREE.Vector3();
 const _dir = new THREE.Vector3(), _muz = new THREE.Vector3(), _right = new THREE.Vector3(), _up = new THREE.Vector3();
@@ -34,10 +40,30 @@ const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
 const angleDiff = (a, b) => { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
 const yawTo = (dx, dz) => Math.atan2(-dx, -dz); // yaw that faces direction (dx, dz); matches the camera convention
 
+// What soldier #id carries: his gun (an ENEMY_ISSUE entry, with AI's numbers
+// for anything it leaves out), how full its magazine is and how many rounds
+// are in his pouches. Rolled from his id, so the host and every co-op friend
+// get the same answer without sending it.
+export function issueFor(id) {
+  const r = mulberry32(((id | 0) * 2654435761) >>> 0);
+  const total = ENEMY_ISSUE.reduce((n, g) => n + g.share, 0);
+  let x = r() * total, i = 0;
+  while (i < ENEMY_ISSUE.length - 1 && x >= ENEMY_ISSUE[i].share) x -= ENEMY_ISSUE[i++].share;
+  const g = ENEMY_ISSUE[i], mag = g.mag ?? AI.magSize, [s0, s1] = g.spare ?? [1, 3];
+  return {
+    index: i, gun: g.gun, mag, reload: g.reload ?? AI.reloadTime,
+    rpm: g.rpm ?? AI.rpm, burst: g.burst ?? [AI.burstMin, AI.burstMax], damage: g.damage ?? 1, spread: g.spread ?? 1,
+    magLeft: Math.max(1, Math.round(mag * (0.25 + r() * 0.75))), // what's still in his gun when he drops it
+    spare: mag * (s0 + Math.floor(r() * (s1 - s0 + 1))),        // rounds in his pouches
+  };
+}
+
 class Enemy {
   constructor(mgr, spawn) {
     this.mgr = mgr;
     this.body = mgr.factory.create({ seed: mgr.nextNetId + 1 }); // which soldier model: from the id he's about to get, so co-op friends see the same face
+    this.issue = issueFor(mgr.nextNetId + 1);                   // and which gun (the same way)
+    this.body.setGun(mgr.factory.issueGun(this.issue.gun));
     this.root = this.body.root;
     mgr.scene.add(this.root);
     for (const m of this.body.hitMeshes) m.userData.enemy = this;
@@ -70,7 +96,7 @@ class Enemy {
 
     this.crouch = 0; this.wantCrouch = false;
     this.aimTime = 0; this.reaction = rand(AI.reactionMin, AI.reactionMax) * mgr.difficulty.reaction;
-    this.burstLeft = 0; this.fireTimer = 0; this.ammo = AI.magSize; this.reloadTimer = 0;
+    this.burstLeft = 0; this.fireTimer = 0; this.ammo = this.issue.mag; this.reloadTimer = 0;
     this.cover = null; this.coverTimer = 0; this.peek = false; this.coverSearchTimer = 0;
     this.suppression = 0;
     this.grenades = 1;     // each soldier carries one frag
@@ -386,15 +412,15 @@ class Enemy {
 
     // --- shooting ---
     if (this.reloadTimer > 0) {
-      if ((this.reloadTimer -= dt) <= 0) this.ammo = AI.magSize;
+      if ((this.reloadTimer -= dt) <= 0) this.ammo = this.issue.mag;
     } else if (seeing && !this.climb && this.aimTime > this.reaction && Math.abs(angleDiff(this.yaw, this.lookYaw)) < 0.2 && player.alive) {
       this.fireTimer -= dt;
-      if (this.burstLeft <= 0 && this.fireTimer <= 0) this.burstLeft = Math.round(rand(AI.burstMin, AI.burstMax));
+      if (this.burstLeft <= 0 && this.fireTimer <= 0) this.burstLeft = Math.round(rand(...this.issue.burst));
       if (this.burstLeft > 0 && this.fireTimer <= 0) {
         this._shoot(player, dist);
         this.burstLeft--;
-        this.fireTimer = this.burstLeft > 0 ? 60 / AI.rpm : rand(AI.burstPauseMin, AI.burstPauseMax) * (1 + this.suppression);
-        if (--this.ammo <= 0) { this.reloadTimer = AI.reloadTime; this.burstLeft = 0; }
+        this.fireTimer = this.burstLeft > 0 ? 60 / this.issue.rpm : rand(AI.burstPauseMin, AI.burstPauseMax) * (1 + this.suppression);
+        if (--this.ammo <= 0) { this.reloadTimer = this.issue.reload; this.burstLeft = 0; }
       }
     }
 
@@ -477,7 +503,7 @@ class Enemy {
     if (player.horizontalSpeed > 3) spread *= 1.5;
     if (this.health < 50) spread *= 1.3;
     spread *= 1 + this.suppression * 1.5;
-    spread *= mgr.difficulty.spread;
+    spread *= mgr.difficulty.spread * this.issue.spread;
     _right.set(-_dir.z, 0, _dir.x).normalize();
     _up.crossVectors(_right, _dir);
     _dir.addScaledVector(_right, gauss() * spread).addScaledVector(_up, gauss() * spread).normalize();
@@ -486,11 +512,11 @@ class Enemy {
     this.body.muzzleWorld(_muz);
     const tracer = Math.random() < 0.3;
     mgr.ballistics.fire({
-      origin: _origin, dir: _dir, speed: AI.muzzleVelocity, damage: AI.damage * mgr.difficulty.damage, team: 'enemy',
+      origin: _origin, dir: _dir, speed: AI.muzzleVelocity, damage: AI.damage * this.issue.damage * mgr.difficulty.damage, team: 'enemy',
       penetration: 0.8, tracer, visualOffset: _off.subVectors(_muz, _origin), headMul: AI.headMul,
     });
     mgr.effects.muzzleFlash(_muz, true, 0.4);
-    mgr.audio.gunshot(_muz.clone(), 'rifle', false);
+    mgr.audio.gunshot(_muz.clone(), this.issue.gun.id, false);
     mgr.onShoot?.(this, _origin, _dir, tracer); // co-op: everyone else sees this shot too
     this.lastFiredAt = performance.now() / 1000;  // shows on enemy radar ("when firing" mode)
   }

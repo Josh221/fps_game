@@ -48,6 +48,7 @@ import * as THREE from 'three';
 import { NetClient, RemoteClock, Interpolator, LERP, ANGLE, STEP, now, r1, r2, r3, r4 } from './net.js';
 import { Teammate, packPlayer } from './teammate.js';
 import { NET, AI, WEAPONS, DIFFICULTY } from './config.js';
+import { issueFor } from './enemy.js';
 
 const _muz = new THREE.Vector3(), _off = new THREE.Vector3(), _v = new THREE.Vector3();
 const vec = (a) => new THREE.Vector3(+a?.[0] || 0, +a?.[1] || 0, +a?.[2] || 0);
@@ -72,6 +73,8 @@ class EnemyPuppet {
     this.session = session;
     this.netId = netId;
     this.body = session.factory.create({ seed: netId }); // the same soldier model the host picked for this id (enemy.js)
+    this.issue = issueFor(netId);                          // and the same gun
+    this.body.setGun(session.factory.issueGun(this.issue.gun));
     this.root = this.body.root;
     session.scene.add(this.root);
     for (const m of this.body.hitMeshes) m.userData.enemy = this;
@@ -581,11 +584,12 @@ export class CoopSession {
     if (!this.isClient) return;
     const pup = this.puppets.get(m.e);
     const origin = vec(m.o), dir = vec(m.d).normalize();
+    const issue = pup?.issue || issueFor(+m.e); // what he's carrying: how it sounds and hits
     if (pup) { pup.body.muzzleWorld(_muz); pup.lastFiredAt = now(); } else _muz.copy(origin);
     this.effects.muzzleFlash(_muz, true, 0.4);
-    this.audio.gunshot(_muz.clone(), 'rifle', false);
+    this.audio.gunshot(_muz.clone(), issue.gun.id, false);
     this.ballistics.fire({
-      origin, dir, speed: AI.muzzleVelocity, damage: AI.damage * this.enemies.difficulty.damage, team: 'enemy', penetration: 0.8,
+      origin, dir, speed: AI.muzzleVelocity, damage: AI.damage * issue.damage * this.enemies.difficulty.damage, team: 'enemy', penetration: 0.8,
       tracer: !!m.tr, visualOffset: _off.subVectors(_muz, origin), headMul: AI.headMul,
     });
   }

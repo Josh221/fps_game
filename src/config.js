@@ -215,6 +215,23 @@ export const AI = {
   reloadTime: 2.6,
 };
 
+// What the enemy carries. Each soldier's gun is rolled from his network id
+// (enemy.js issueFor), so every computer in a co-op game agrees on it; `share`
+// is how often it turns up. They're the same guns as yours (loadout.js), so
+// one you pick up off a body works exactly like one built in the armory.
+// The AI fires each its own way; anything left out comes from AI above:
+//   rpm, burst [min, max]   rate of fire and rounds per burst
+//   damage, spread          multiply AI.damage and AI.baseSpread
+//   mag, reload             rounds per magazine, seconds to reload
+//   spare [min, max]        full spare magazines on his webbing: what you can loot
+export const ENEMY_ISSUE = [
+  { share: 42, gun: { id: 'rifle', mods: {} }, spare: [1, 4] },
+  { share: 16, gun: { id: 'rifle', mods: { optic: 'reddot', underbarrel: 'vgrip' } }, spare: [1, 4] },
+  { share: 18, gun: { id: 'smg', mods: {} }, rpm: 800, burst: [4, 8], damage: 0.8, spread: 1.2, reload: 2.2, spare: [1, 4] },
+  { share: 14, gun: { id: 'dmr', mods: { optic: 'acog' } }, rpm: 220, burst: [1, 2], damage: 1.6, spread: 0.65, mag: 20, reload: 3.0, spare: [1, 3] },
+  { share: 10, gun: { id: 'lmg', mods: {} }, rpm: 700, burst: [6, 12], damage: 0.9, spread: 1.25, mag: 100, reload: 5.5, spare: [0, 1] },
+];
+
 export const GAME = {
   firstWave: 7,
   waveGrowth: 2,

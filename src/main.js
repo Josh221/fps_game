@@ -19,7 +19,7 @@
 //   COMBAT    pick a map, take it, hold it against waves of counterattacks.
 // =============================================================================
 import * as THREE from 'three';
-import { PLAYER, GAME, NET, DIFFICULTY } from './config.js';
+import { PLAYER, GAME, NET, DIFFICULTY, ENEMY_ISSUE } from './config.js';
 import { Input } from './input.js';
 import { mulberry32 } from './textures.js';
 import { Assets } from './assets.js';
@@ -1010,11 +1010,12 @@ async function init() {
     const sample = factory.create(), friend = factory.create({ tint: NET.friendlyTint, avatar: armory.avatar }); // (a squadmate in your look: gear and painted uniform shaders)
     sample.root.position.set(level.playerSpawn.pos.x, level.playerSpawn.pos.y, level.playerSpawn.pos.z - 6);
     friend.root.position.set(level.playerSpawn.pos.x + 1, level.playerSpawn.pos.y, level.playerSpawn.pos.z - 6);
-    scene.add(sample.root, friend.root);
+    const issued = ENEMY_ISSUE.map((g, i) => { const m = factory.issueGun(g.gun).group; m.position.set(level.playerSpawn.pos.x - 1 + i * 0.4, level.playerSpawn.pos.y + 1, level.playerSpawn.pos.z - 6); return m; }); // (every gun an enemy can carry)
+    scene.add(sample.root, friend.root, ...issued);
     R.renderer.compile(scene, camera);
     R.renderer.compile(vm.scene, vm.camera);
     R.render(0, { showViewmodel: true });
-    scene.remove(sample.root, friend.root);
+    scene.remove(sample.root, friend.root, ...issued);
     friend.setAvatar(null);
     for (const o of hidden) o.visible = false;
     vm.setWeapon(weapons.currentId);

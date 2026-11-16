@@ -197,21 +197,31 @@ export function buildWeapon(w) {
 //   "rifle.acog.suppressor.std.vgrip.std.std.fmj.woodland.black.red/pistol.iron.std.std.fmj.black.black.red"
 // gun id, then one part per slot in the order of GUNS[id].allow.
 export function encodeWeapons(lo) {
-  const one = (w) => [w.id, ...Object.keys(GUNS[w.id].allow).map((slot) => w.mods[slot])].join('.');
-  return `${one(lo.primary)}/${one(lo.secondary)}`;
+  return `${encodeGun(lo.primary)}/${encodeGun(lo.secondary)}`;
+}
+
+// One gun: "dmr.acog.std.std.none.std.std.fmj.desert.black.red". (A gun
+// dropped on the ground travels like this too: loot.js.)
+export function encodeGun(w) {
+  const n = normalizeWeapon(w);
+  return [n.id, ...Object.keys(GUNS[n.id].allow).map((slot) => n.mods[slot])].join('.');
+}
+
+// The reverse; null if it isn't a gun. Any part that isn't a legal choice
+// falls back to the default (normalizeWeapon), so made-up text can't break anything.
+export function decodeGun(text) {
+  if (typeof text !== 'string') return null;
+  const [id, ...parts] = text.split('.');
+  if (!Object.hasOwn(GUNS, id)) return null;
+  return normalizeWeapon({ id, mods: Object.fromEntries(Object.keys(GUNS[id].allow).map((slot, i) => [slot, parts[i]])) });
 }
 
 // The reverse. Everything is checked against the tables (normalizeLoadout),
 // so a garbled or made-up string can only ever produce a legal loadout.
 export function decodeWeapons(text) {
   if (typeof text !== 'string' || !text.includes('/')) return null;
-  const one = (part) => {
-    const [id, ...parts] = part.split('.');
-    if (!GUNS[id]) return null;
-    return { id, mods: Object.fromEntries(Object.keys(GUNS[id].allow).map((slot, i) => [slot, parts[i]])) };
-  };
   const [p, s] = text.split('/');
-  const primary = one(p), secondary = one(s);
+  const primary = decodeGun(p), secondary = decodeGun(s);
   if (!primary || !secondary) return null;
   const L = normalizeLoadout({ primary, secondary });
   return { primary: L.primary, secondary: L.secondary };

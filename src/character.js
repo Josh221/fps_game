@@ -34,7 +34,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Wardrobe } from './avatar.js';
 import { buildGun } from './gunsmith.js';
-import { buildWeapon } from './loadout.js';
+import { buildWeapon, encodeGun } from './loadout.js';
 import { mulberry32 } from './textures.js';
 
 // The game's names for the bones it uses -> the Biped skeleton's names
@@ -469,11 +469,12 @@ class Rig {
 const ROUGH = { body: 0.92, head: 0.6, helmet: 0.8, equipment: 0.85 };
 function partOf(name) { return PARTS.find((p) => name.toLowerCase().endsWith(`_${p}`)) || null; }
 
-// The enemies' rifle: the gunsmith's carbine, merged into one mesh per
-// material and SHARED by every soldier carrying it (a few draw calls per
+// An enemy's gun: the gunsmith's model, merged into one mesh per material
+// and SHARED by every soldier carrying the same gun (a few draw calls per
 // soldier, instead of the ~60 separate parts a detailed gun is made of).
-function sharedRifle(M) {
-  const g = buildGun(M, buildWeapon({ id: 'rifle' }), { hands: false });
+// w = a loadout entry, { id, mods } (config.js ENEMY_ISSUE).
+function sharedGun(M, w) {
+  const g = buildGun(M, buildWeapon(w), { hands: false });
   g.group.updateMatrixWorld(true);
   const byMat = new Map();
   g.group.traverse((o) => {
@@ -486,7 +487,7 @@ function sharedRifle(M) {
     byMat.set(o.material, list);
   });
   const parts = [...byMat].map(([mat, geos]) => ({ geo: mergeGeometries(geos), mat }));
-  return { parts, muzzle: g.muzzle.position.clone(), grip: g.grip.clone(), fore: g.fore.clone(), butt: g.butt.clone() };
+  return { parts, muzzle: g.muzzle.position.clone(), grip: g.grip.clone(), fore: g.fore.clone(), butt: g.butt?.clone() ?? null, kind: w.id === 'pistol' ? 'pistol' : 'long' };
 }
 
 // The gloves are part of the uniform texture, but we want to colour them on
@@ -541,7 +542,7 @@ export class SoldierFactory {
       return { ...v, mats, rig: null };
     });
     this.tint = tint ?? null; // this map's enemy uniform (the wardrobe recolours the camo)
-    this._rifle = null;
+    this._guns = new Map();   // shared enemy guns, by encodeGun() text
   }
 
   get count() { return this.variants.length; }
@@ -568,14 +569,20 @@ export class SoldierFactory {
     return body;
   }
 
-  // The enemies' rifle (built once, shared)
-  rifle() {
-    const r = (this._rifle ??= sharedRifle(this.M));
+  // A gun for a soldier to carry, from a loadout entry ({ id, mods }). Each
+  // kind is built once; every soldier carrying one shares its meshes' geometry.
+  issueGun(w) {
+    const key = encodeGun(w);
+    let r = this._guns.get(key);
+    if (!r) this._guns.set(key, (r = sharedGun(this.M, w)));
     const group = new THREE.Group();
     for (const p of r.parts) { const m = new THREE.Mesh(p.geo, p.mat); m.castShadow = true; group.add(m); }
     const muzzle = new THREE.Object3D(); muzzle.position.copy(r.muzzle); group.add(muzzle);
-    return { group, muzzle, grip: r.grip, fore: r.fore, butt: r.butt, kind: 'long' };
+    return { group, muzzle, grip: r.grip, fore: r.fore, butt: r.butt, kind: r.kind };
   }
+
+  // The standard carbine (anyone with nothing else to carry)
+  rifle() { return this.issueGun({ id: 'rifle', mods: {} }); }
 }
 
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
