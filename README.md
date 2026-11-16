@@ -591,6 +591,18 @@ server/
 `window.game` in the browser console gives live access to everything. For example,
 `game.player.health = 1000`.
 
+## Licence
+
+The game's code is free for any **non-commercial** use under the
+[PolyForm Noncommercial License 1.0.0](LICENSE.md). You can play it, study it, change it, share it,
+and use it in hobby projects, schools and charities. You can't sell it or use it to make money:
+no paid copies, paid access, ads, or use for a business. If you share it, or something you built
+from it, include [LICENSE.md](LICENSE.md) with its `Required Notice:` line. To use it
+commercially, ask for permission by opening an issue on GitHub.
+
+The licence covers this repository's code. The downloaded textures, models and soldiers keep their
+own licences (see Credits below).
+
 ## Credits
 
 Textures, models and skies come from [Poly Haven](https://polyhaven.com) (CC0), and the trees from
