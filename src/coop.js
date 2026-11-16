@@ -37,6 +37,7 @@
 //   host -> friends  snap  every soldier's state     es  an enemy fired     kill  enemy down (who got him, which way he fell)
 //                    ev  wave started / area secure / mission won           score  everyone's kills and deaths
 //   both ways        sh  a squadmate fired     gr  a grenade was thrown     spot  an enemy was spotted
+//   LOOT (loot.js)   friend -> host  lq  "can I take this?"      host -> friends  lt  "player #n took it"
 //
 // CAMPAIGN missions (campaign/director.js) add three things:
 //   • the host's snapshot carries the mission state in `x` (objective,
@@ -151,6 +152,7 @@ export class CoopSession {
     this.spotting = null;
     this.minimap = null;
     this.mission = null;           // the campaign's MissionDirector (main.js sets it)
+    this.loot = null;              // picking things up off the fallen (loot.js; main.js sets it)
 
     // main.js fills these in
     this.onRoom = null;            // (room, previousRoom) lobby state changed
@@ -244,6 +246,7 @@ export class CoopSession {
     net.on('ht', (m) => this._friendHit(m));
     net.on('nz', (m) => { if (this.isHost) this.enemies.hearNoise(vec(m.p), Math.min(20, +m.r || 0), 'footstep'); });
     net.on('act', (m) => { if (this.isHost) this.mission?.remoteAct(m.from, String(m.k), +m.i); }); // campaign: a friend is using / observing something
+    net.on('lq', (m) => { if (this.isHost) this.loot?.request(m); }); // a friend wants to pick something up
     // game: both sides
     net.on('sh', (m) => this._shotFrom(m));
     net.on('gr', (m) => this._grenadeFrom(m));
@@ -253,6 +256,7 @@ export class CoopSession {
     net.on('snap', (m) => this._snapshot(m));
     net.on('es', (m) => this._enemyShot(m));
     net.on('kill', (m) => this._killFrom(m));
+    net.on('lt', (m) => { if (this.isClient) this.loot?.result(m); }); // the host says who took what
     net.on('ev', (m) => this.onEvent?.(m));
     net.on('score', (m) => { if (this.isClient && Array.isArray(m.s)) this.scoreRows = m.s; });
   }

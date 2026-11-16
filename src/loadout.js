@@ -90,18 +90,20 @@ const PAINT_JOB = { camo: [...PAINT_IDS, 'walnut'], metal: Object.keys(ATTACHMEN
 const WOOD_FIRST = { ...PAINT_JOB, camo: ['walnut', ...PAINT_IDS] };
 
 // What each gun can take, its weight and the look of its body (used by viewmodel.js).
+// cal = the cartridge it fires. Ammo you take off a body only fits guns of the
+// same calibre (loot.js): a dead SMG gunner's 9 mm feeds your sidearm, not your carbine.
 export const GUNS = {
-  rifle: { label: '5.56 Carbine', role: 'Rifleman', slot: 'primary', weight: 3.4, desc: 'Versatile 5.56 carbine. Good at every range.',
+  rifle: { label: '5.56 Carbine', role: 'Rifleman', cal: '5.56', slot: 'primary', weight: 3.4, desc: 'Versatile 5.56 carbine. Good at every range.',
     allow: { optic: ['iron', 'reddot', 'holo', 'acog'], muzzle: ['std', 'suppressor', 'compensator', 'brake'], barrel: ['short', 'std', 'long'], underbarrel: ['none', 'vgrip', 'agrip'], magazine: ['std', 'ext', 'fast', 'drum'], stock: ['std', 'heavy', 'light'], ammo: ['fmj', 'ap', 'hp'], ...PAINT_JOB } },
-  smg: { label: '9mm SMG', role: 'Close quarters', slot: 'primary', weight: 2.9, desc: 'Fast-firing and light. Deadly in buildings, weak at range.',
+  smg: { label: '9mm SMG', role: 'Close quarters', cal: '9mm', slot: 'primary', weight: 2.9, desc: 'Fast-firing and light. Deadly in buildings, weak at range.',
     allow: { optic: ['iron', 'reddot', 'holo'], muzzle: ['std', 'suppressor', 'compensator'], barrel: ['short', 'std', 'long'], underbarrel: ['none', 'vgrip', 'agrip'], magazine: ['std', 'ext', 'fast', 'drum'], stock: ['std', 'heavy', 'light'], ammo: ['fmj', 'ap', 'hp'], ...PAINT_JOB } },
-  dmr: { label: '7.62 DMR', role: 'Marksman', slot: 'primary', weight: 4.6, desc: 'Semi-auto battle rifle. Two body shots kill. Strong recoil.',
+  dmr: { label: '7.62 DMR', role: 'Marksman', cal: '7.62', slot: 'primary', weight: 4.6, desc: 'Semi-auto battle rifle. Two body shots kill. Strong recoil.',
     allow: { optic: ['iron', 'reddot', 'acog', 'scope'], muzzle: ['std', 'suppressor', 'compensator', 'brake'], barrel: ['std', 'long'], underbarrel: ['none', 'vgrip', 'bipod'], magazine: ['std', 'ext', 'fast'], stock: ['std', 'heavy', 'light'], ammo: ['fmj', 'ap', 'hp'], ...PAINT_JOB } },
-  lmg: { label: '5.56 LMG', role: 'Support', slot: 'primary', weight: 7.9, desc: '100-round belt box. Lay down suppressing fire. Heavy.',
+  lmg: { label: '5.56 LMG', role: 'Support', cal: '5.56', slot: 'primary', weight: 7.9, desc: '100-round belt box. Lay down suppressing fire. Heavy.',
     allow: { optic: ['iron', 'reddot', 'holo', 'acog'], muzzle: ['std', 'suppressor', 'compensator'], barrel: ['short', 'std', 'long'], underbarrel: ['none', 'vgrip', 'bipod'], magazine: ['std', 'fast'], stock: ['std', 'heavy'], ammo: ['fmj', 'ap', 'hp'], ...PAINT_JOB } },
-  bolt: { label: '7.62 Bolt-action', role: 'Sniper', slot: 'primary', weight: 4.8, desc: 'One body shot kills. Work the bolt between every shot.',
+  bolt: { label: '7.62 Bolt-action', role: 'Sniper', cal: '7.62', slot: 'primary', weight: 4.8, desc: 'One body shot kills. Work the bolt between every shot.',
     allow: { optic: ['iron', 'acog', 'scope'], muzzle: ['std', 'suppressor', 'brake'], barrel: ['std', 'long'], underbarrel: ['none', 'bipod'], magazine: ['std', 'ext'], stock: ['std', 'heavy'], ammo: ['fmj', 'ap', 'hp'], ...WOOD_FIRST } },
-  pistol: { label: '9mm Sidearm', role: 'Sidearm', slot: 'secondary', weight: 0.9, desc: 'Reliable sidearm for when the rifle runs dry.',
+  pistol: { label: '9mm Sidearm', role: 'Sidearm', cal: '9mm', slot: 'secondary', weight: 0.9, desc: 'Reliable sidearm for when the rifle runs dry.',
     allow: { optic: ['iron', 'reddot'], muzzle: ['std', 'suppressor'], magazine: ['std', 'ext'], ammo: ['fmj', 'ap', 'hp'], ...PAINT_JOB } },
 };
 

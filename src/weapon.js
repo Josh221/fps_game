@@ -33,8 +33,32 @@ export class WeaponSystem {
   // A new loadout (built weapon configs). Rebuilds the guns you see.
   setLoadout({ primary, secondary }) {
     this.cfgs = { primary, secondary };
+    this.pickedUp = false;
     this.vm.setLoadout(this.cfgs);
     this.reset();
+  }
+
+  // A gun picked up off the ground (loot.js) goes into its slot, with the
+  // rounds it came with, and comes up into your hands. The other slot keeps
+  // its ammo. (pickedUp: main.js re-issues your own loadout when you respawn.)
+  equip(slot, cfg, mag, reserve) {
+    this.cfgs = { ...this.cfgs, [slot]: cfg };
+    this.pickedUp = true;
+    const keep = this.state, shots = this.shotsFired;
+    this.vm.setLoadout(this.cfgs);
+    this.reset();
+    this.shotsFired = shots; // (your accuracy counts every shot of the mission)
+    const zoom = cfg.optic?.zoom || 1;
+    this.state = { ...keep, [slot]: { cfg, mag, reserve, mode: 0, zoom, zoomNow: zoom } };
+    this.currentId = slot;
+    this.vm.setWeapon(slot);
+    this.switchT = 1; // ...raised from below, like any weapon switch
+  }
+
+  // What you're carrying now, as loadout entries ({ id, mods }): co-op squadmates draw these
+  carried() {
+    const one = (cfg) => ({ id: cfg.base, mods: cfg.attachments });
+    return { primary: one(this.cfgs.primary), secondary: one(this.cfgs.secondary) };
   }
 
   reset() {

@@ -50,7 +50,8 @@ import { GRENADE } from './config.js';
 import { Armory } from './armory.js';
 import { dressFirstPerson } from './avatar.js';
 import { ScopeOverlay } from './scope.js';
-import { resolveLoadout } from './loadout.js';
+import { resolveLoadout, encodeWeapons } from './loadout.js';
+import { Loot } from './loot.js';
 import { MissionDirector } from './campaign/director.js';
 import { Radio } from './campaign/radio.js';
 import { CampaignHud } from './campaign/hud.js';
@@ -231,6 +232,15 @@ async function init() {
   grenades.onExplode = (pos) => { if (!coop.isClient) { enemies.hearNoise(pos, 250, 'gunshot'); enemies.onImpact?.(pos); } };
   coop.attachExtras?.({ grenades, spotting: tactical, minimap: tactical });
 
+  // Loot (loot.js): ammo and guns off the fallen. Picking up a gun changes
+  // what's in your hands, so compile its shaders now (not on its first frame)
+  // and show your squad what you're carrying.
+  const loot = (coop.loot = new Loot({ scene, world, factory, enemies, weapons, player, camera, coop, audio, hud }));
+  loot.onEquip = () => {
+    if (warmed) R.renderer.compile(vm.scene, vm.camera);
+    coop.setKit(kitNow());
+  };
+
   // Campaign: the mission director runs story missions (campaign/director.js),
   // the radio plays their dialogue, and the campaign HUD draws objective
   // markers, banners and the title card.
@@ -259,13 +269,16 @@ async function init() {
     }
   }
   armory.canApplyNow = () => !(game.deployed && player.alive);
+  // What the squad sees you carrying: your kit, but the guns actually in your
+  // hands (one you picked up off the ground, until you're issued yours again)
+  const kitNow = () => ({ ...armory.kitInfo, w: encodeWeapons(weapons.carried()) });
   armory.onChange = () => {
     if (armory.canApplyNow()) applyLoadout(); else pendingLoadout = true;
-    coop.setKit(armory.kitInfo); // co-op: show your squad your new class
+    coop.setKit(kitNow()); // co-op: show your squad your new class
   };
   // Your soldier's look (avatar.js) is cosmetic, so it applies at once, even mid-mission:
   // your sleeves and gloves in first person, and what your squad sees.
-  armory.onAvatar = () => { dressFirstPerson(M, armory.avatar); vm.dressArms(armory.avatar); coop.setKit(armory.kitInfo); };
+  armory.onAvatar = () => { dressFirstPerson(M, armory.avatar); vm.dressArms(armory.avatar); coop.setKit(kitNow()); };
   dressFirstPerson(M, armory.avatar);
   vm.attachArms(factory, armory.avatar); // your arms in first person: a real soldier in your look (viewmodel.js)
   coop.setKit(armory.kitInfo);
@@ -355,10 +368,11 @@ async function init() {
     game.mode = wantCampaign && director.data ? 'campaign' : 'waves';
     if (game.mode !== 'campaign' && director.live) director.stop();
     spawnLocalPlayer();
-    if (pendingLoadout) applyLoadout();
+    if (pendingLoadout || weapons.pickedUp) applyLoadout(); // (your own guns back, if you'd picked one up)
     weapons.reset();
     grenades.reset();
     ballistics.clear();
+    loot.clear();
     radio.clear();
     chud.clearBanners();
     Object.assign(stats, { kills: 0, headshots: 0, hits: 0, time: 0 });
@@ -511,7 +525,7 @@ async function init() {
   function respawnAtCheckpoint() {
     if (!game.deployed) return;
     spawnLocalPlayer();
-    if (pendingLoadout) applyLoadout();
+    if (pendingLoadout || weapons.pickedUp) applyLoadout();
     weapons.reset();
     grenades.reset();
     Object.assign(game, { over: false, respawnT: 0 });
@@ -548,7 +562,7 @@ async function init() {
     game.respawnT -= dt;
     if (game.respawnT <= 0) {
       spawnLocalPlayer();
-      if (pendingLoadout) applyLoadout();
+      if (pendingLoadout || weapons.pickedUp) applyLoadout();
       weapons.reset();
       grenades.reset();
       hud.message('BACK IN THE FIGHT', 2);
@@ -628,6 +642,7 @@ async function init() {
     enemies.clear();
     ballistics.clear();
     grenades.reset();
+    loot.clear();
     Object.assign(game, { deployed: false, state: 'menu', wave: 0, between: false, over: false, respawnT: 0, mode: 'waves' });
     renderCampaignMenu();
     player.reset(level.playerSpawn.pos, level.playerSpawn.yaw); // menu backdrop: back at the start
@@ -910,6 +925,7 @@ async function init() {
       chud.hideCard();
       chud.clearBanners();
       grenades.reset(); // no live grenades carried over into the next mission
+      loot.clear();     // nor guns lying about
       if (game.state !== 'menu') leaveMission();
     }
     if (game.state === 'menu') enterLobby(); // just joined
@@ -1093,6 +1109,9 @@ async function init() {
           hud.message(newKit ? 'NEW LOADOUT ISSUED' : 'RESUPPLIED', 1.5);
         }
       }
+      // Bodies and guns on the ground: [F] take ammo, hold [F] swap guns (loot.js)
+      const lootPrompt = loot.update(dt, ctl, !game.prompt && playing && game.deployed && player.alive);
+      if (!game.prompt) game.prompt = lootPrompt;
       // Otherwise, what you can do right here: "[SPACE] VAULT", "[W] CLIMB LADDER"...
       if (!game.prompt && playing && game.deployed && player.alive) game.prompt = player.hint;
     }
@@ -1168,6 +1187,7 @@ async function init() {
   window.game = {
     scene, camera, renderer: R, world, terrain, level, nav, player, weapons, enemies, ballistics, effects, audio, input, stats, map, coop, voice, rules: game, grenades, tactical, armory, applyLoadout, vm, builder,
     director, radio, chud, // campaign
+    loot,
     // Tests: start a campaign mission without the menus (pointer lock)
     debugMission(id) { menuMode = 'campaign'; director.load(id); startGame(); game.state = 'playing'; showPanel(null); hud.show(true); },
     debugStart() { startGame(); game.state = 'playing'; showPanel(null); hud.show(true); },

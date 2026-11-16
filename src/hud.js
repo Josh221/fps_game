@@ -298,7 +298,7 @@ export class HUD {
     if (s.prompt) prompt = s.prompt;
     else if (w.reloading) prompt = 'RELOADING';
     else if (w.mag === 0 && w.reserve > 0) prompt = '[R] RELOAD';
-    else if (w.mag === 0) prompt = 'NO AMMO — [2] SIDEARM / FIND AMMO CRATE';
+    else if (w.mag === 0) prompt = 'NO AMMO — [2] SIDEARM · AMMO CRATE · TAKE IT OFF THE FALLEN';
     this.text(e.prompt, prompt);
 
     // timed effects (opacities rounded so tiny changes don't count as "changed")

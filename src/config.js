@@ -232,6 +232,13 @@ export const ENEMY_ISSUE = [
   { share: 10, gun: { id: 'lmg', mods: {} }, rpm: 700, burst: [6, 12], damage: 0.9, spread: 1.25, mag: 100, reload: 5.5, spare: [0, 1] },
 ];
 
+// Picking things up off the fallen (loot.js)
+export const LOOT = {
+  reach: 2.2,               // metres: how close you have to be to a body or a gun
+  holdTime: 0.4,            // seconds to hold F to swap your gun for one on the ground
+  maxDropped: 14,           // guns players have dropped; past this the oldest disappear
+};
+
 export const GAME = {
   firstWave: 7,
   waveGrowth: 2,
