@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operation Dustline</title>
+  <link rel="icon" href="data:,">
+
+  <link rel="stylesheet" href="style.css">
+  <!-- Import map: lets us write `import * as THREE from 'three'` with no build step. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "@dgreenheck/ez-tree": "https://cdn.jsdelivr.net/npm/@dgreenheck/ez-tree@1.1.0/build/ez-tree.es.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- ===== HUD (heads-up display) ===== -->
+  <div id="hud" class="hidden">
+    <div id="vignette"></div>
+    <div id="suppression"></div>
+    <div id="blood"></div>
+    <div id="hurt-flash"></div>
+
+    <div id="compass"><div id="compass-strip"></div><div id="compass-needle"></div></div>
+    <div id="objective"></div>
+    <div id="killfeed"></div>
+
+    <div id="crosshair">
+      <i class="ch t"></i><i class="ch b"></i><i class="ch l"></i><i class="ch r"></i><i class="dot"></i>
+    </div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="damage-dirs"></div>
+    <div id="tags"></div>
+
+    <div id="prompt"></div>
+    <div id="message"></div>
+
+    <div id="status">
+      <div class="bar"><label>HP</label><div class="track"><div id="hp-fill" class="fill"></div></div><span id="hp-num">100</span></div>
+      <div class="bar small"><label>STA</label><div class="track"><div id="sta-fill" class="fill"></div></div></div>
+      <div id="bandages"></div>
+    </div>
+
+    <div id="weapon-info">
+      <div id="weapon-name"></div>
+      <div id="fire-mode"></div>
+      <div id="ammo"><span id="ammo-mag">30</span><span id="ammo-res">/ 120</span></div>
+    </div>
+
+    <div id="fps"></div>
+
+    <!-- Co-op chat (Enter or Y) and scoreboard (hold Tab) -->
+    <div id="chat"><div id="chat-hint" class="hidden">ENTER chat · B talk · TAB squad</div><div id="chat-log"></div><input id="chat-input" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Say something — Enter to send, Esc to cancel"></div>
+    <div id="scoreboard" class="hidden"></div>
+    <div id="tx" class="hidden">● TRANSMITTING</div>
+  </div>
+  <div id="netbanner" class="hidden">CONNECTION LOST — RECONNECTING…</div>
+
+  <!-- ===== Menus ===== -->
+  <div id="overlay">
+    <div id="menu" class="panel">
+      <h1>OPERATION DUSTLINE</h1>
+      <!-- CAMPAIGN: the story missions (src/campaign/). COMBAT: pick a map and hold it against waves. -->
+      <div id="mode-tabs"><button data-mode="campaign">CAMPAIGN</button><button data-mode="combat">COMBAT</button></div>
+      <p class="sub" id="menu-sub">Take the objective. Hold it against the counterattacks.</p>
+      <div id="campaign-box" class="hidden">
+        <div id="missions"></div>
+      </div>
+      <div id="maps"></div>
+      <div id="mission-settings" class="coop-row">
+        <label>Difficulty <select id="difficulty"></select></label>
+        <label id="length-row">Mission <select id="mission-length"></select></label>
+        <label>Enemy radar <select id="radar-mode"></select></label>
+      </div>
+      <button id="deploy" disabled>LOADING…</button>
+
+      <!-- Co-op: needs the game started with `npm start` (server/server.mjs) -->
+      <div id="coop">
+        <div class="coop-title">CO-OP · UP TO 4 PLAYERS</div>
+        <div id="coop-offline" class="hidden"></div>
+        <div id="coop-controls" class="coop-row">
+          <input id="callsign" maxlength="12" placeholder="Your callsign" autocomplete="off" spellcheck="false">
+          <button id="host-btn" class="ghost" disabled>HOST GAME</button>
+          <span class="or">or</span>
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
+          <button id="join-btn" class="ghost" disabled>JOIN</button>
+        </div>
+        <div id="coop-status"></div>
+        <div id="games-box" class="hidden">
+          <div class="coop-title">OPEN GAMES</div>
+          <div id="games"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- The co-op lobby: drawn by src/lobby.js from the server's room state -->
+    <div id="lobby" class="panel hidden">
+      <div class="lobby-head">
+        <h2>SQUAD LOBBY</h2>
+        <div class="lobby-code">ROOM <b id="lobby-code">----</b></div>
+      </div>
+      <div id="lobby-invite" class="coop-row">
+        <input id="invite-link" readonly>
+        <button id="copy-btn" class="ghost">COPY INVITE LINK</button>
+      </div>
+      <p id="invite-note" class="blurb hidden">Friends' browsers will warn "not private" once: it's this computer's own certificate.
+        They click <b>Advanced → Proceed</b>. (HTTPS is what lets browsers use a microphone.)</p>
+      <div class="lobby-grid">
+        <section>
+          <h3>SQUAD</h3>
+          <ol id="lobby-players"></ol>
+        </section>
+        <section class="lobby-settings">
+          <h3>MISSION</h3>
+          <label>Mode <select id="set-mode"><option value="campaign">Campaign</option><option value="waves">Combat (waves)</option></select></label>
+          <label id="set-mission-row">Mission <select id="set-mission"></select></label>
+          <label>Map <select id="set-map"></select></label>
+          <p id="set-map-blurb" class="blurb"></p>
+          <label>Difficulty <select id="set-diff"></select></label>
+          <label id="set-waves-row">Length <select id="set-waves"></select></label>
+          <label>Enemy radar <select id="set-radar"></select></label>
+          <p id="set-radar-blurb" class="blurb"></p>
+          <label class="check"><input type="checkbox" id="set-listed"> Show in "Open games"</label>
+          <button id="lobby-brief" class="ghost hidden">READ THE BRIEFING</button>
+        </section>
+      </div>
+      <div id="lobby-report" class="hidden"></div>
+      <div id="lobby-voice" class="voice-bar"></div>
+      <div class="lobby-chat">
+        <div id="lobby-chat-log"></div>
+        <input id="lobby-chat-input" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Chat with your squad — Enter to send">
+      </div>
+      <div id="lobby-note"></div>
+      <div class="lobby-actions">
+        <button id="lobby-main">READY UP</button>
+        <button id="lobby-leave" class="ghost">LEAVE</button>
+      </div>
+    </div>
+
+    <div id="paused" class="panel hidden">
+      <h2 id="paused-title">PAUSED</h2>
+      <p id="paused-note" class="sub hidden">Co-op: the fight carries on while you're paused.</p>
+      <button id="resume">RESUME</button>
+      <div class="coop-row pause-actions">
+        <button id="to-menu" class="ghost">EXIT TO MENU</button>
+        <button id="to-lobby" class="ghost hidden">BACK TO LOBBY</button>
+        <button id="leave-game" class="ghost hidden">LEAVE GAME</button>
+      </div>
+      <!-- Co-op: chat while paused -->
+      <div id="pause-chat" class="hidden">
+        <div id="pause-voice" class="voice-bar"></div>
+        <div id="pause-chat-log" class="chat-box"></div>
+        <input id="pause-chat-input" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Chat with your squad — Enter to send">
+      </div>
+    </div>
+
+    <div id="dead" class="panel hidden">
+      <h2 id="dead-title">KILLED IN ACTION</h2>
+      <div id="stats"></div>
+      <div class="coop-row">
+        <button id="redeploy">REDEPLOY</button>
+        <button id="restart-mission" class="ghost hidden">RESTART MISSION</button>
+        <button id="to-menu-dead" class="ghost">MAIN MENU</button>
+      </div>
+    </div>
+
+    <!-- Campaign: before a mission (src/campaign/screens.js fills it in) -->
+    <div id="briefing" class="panel hidden">
+      <div class="brief-op" id="brief-op"></div>
+      <h2 id="brief-title"></h2>
+      <div id="brief-meta"></div>
+      <div class="brief-grid">
+        <div id="brief-text"></div>
+        <div class="brief-map"><canvas id="brief-map" width="520" height="520"></canvas>
+          <div class="legend"><span class="s">▲ start</span> <span class="o">① objectives</span> <span class="e">✕ known enemy positions</span></div></div>
+      </div>
+      <div id="brief-voice" class="voice-bar hidden"></div>
+      <div class="coop-row brief-actions">
+        <button id="brief-go">DEPLOY</button>
+        <button id="brief-back" class="ghost">BACK</button>
+      </div>
+    </div>
+
+    <!-- Campaign: after a mission -->
+    <div id="debrief" class="panel hidden">
+      <div class="brief-op" id="debrief-op"></div>
+      <h2 id="debrief-title">MISSION ACCOMPLISHED</h2>
+      <div id="debrief-stars"></div>
+      <ul id="debrief-bonus"></ul>
+      <div id="debrief-stats"></div>
+      <p id="debrief-text"></p>
+      <div class="coop-row">
+        <button id="debrief-next">NEXT MISSION ▸</button>
+        <button id="debrief-replay" class="ghost">PLAY AGAIN</button>
+        <button id="debrief-menu" class="ghost">MAIN MENU</button>
+      </div>
+    </div>
+
+    <div id="netlost" class="panel hidden">
+      <h2>DISCONNECTED</h2>
+      <p id="netlost-msg" class="sub"></p>
+      <button id="netlost-btn">BACK TO MENU</button>
+    </div>
+
+    <div class="controls">
+      <div><b>WASD</b> move</div><div><b>Mouse</b> look</div>
+      <div><b>Shift</b> sprint / hold breath (aiming)</div><div><b>Space</b> jump</div>
+      <div><b>C</b> crouch</div><div><b>Q / E</b> lean</div>
+      <div><b>LMB</b> fire</div><div><b>RMB</b> aim down sights</div>
+      <div><b>R</b> reload</div><div><b>V</b> fire mode</div>
+      <div><b>1 / 2</b> primary / sidearm</div><div><b>H</b> bandage</div>
+      <div><b>Scroll</b> swap weapon / zoom (aiming with sniper scope)</div><div></div>
+      <div><b>F</b> resupply at ammo crate / hold to use</div><div><b>Esc</b> pause</div>
+      <div><b>Tab</b> scoreboard</div><div><b>Enter / Y</b> chat (co-op)</div>
+      <div><b>B</b> push-to-talk (co-op)</div><div></div>
+    </div>
+
+    <div class="settings">
+      <label>Mouse sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1"><span id="sens-val">1.00</span></label>
+      <label>Field of view <input id="fov" type="range" min="60" max="100" step="1" value="75"><span id="fov-val">75</span></label>
+      <label>Graphics <select id="quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+      <label>Frame rate <select id="fpsmode"><option value="auto">Auto</option><option value="full">Full</option><option value="half">Half (steadier)</option></select></label>
+      <label>Radio voices <select id="radio-voice"><option value="1">On</option><option value="0">Subtitles only</option></select></label>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

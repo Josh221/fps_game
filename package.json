@@ -1,0 +1,17 @@
+{
+  "name": "operation-dustline",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based military FPS prototype built with Three.js, written to be read and learned from.",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "solo": "python3 -m http.server 8000",
+    "assets": "node tools/fetch-assets.mjs",
+    "characters": "node tools/fetch-characters.mjs",
+    "check": "for f in src/*.js src/maps/*.js src/campaign/*.js tools/*.mjs server/*.mjs; do node --check $f || exit 1; done && echo 'All modules parse OK'"
+  },
+  "dependencies": {
+    "ws": "^8.22.2"
+  }
+}

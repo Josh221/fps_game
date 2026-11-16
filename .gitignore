@@ -1,0 +1,10 @@
+# Installed by npm install
+node_modules/
+
+# Downloaded by `npm run assets` (textures, models, skies, soldiers: ~300 MB)
+assets/
+
+# The co-op server's self-made HTTPS certificate and its PRIVATE KEY (made on first run)
+.certs/
+
+.DS_Store
