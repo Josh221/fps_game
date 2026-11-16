@@ -12,11 +12,13 @@ see [LEARNING.md](LEARNING.md).
 
 ## Run it
 
+You need [Node.js](https://nodejs.org) 18 or newer and git.
+
 ```bash
 git clone https://github.com/Josh221/fps_game.git
 cd fps_game
 npm install       # one-time: the WebSocket library the co-op server uses
-npm run assets    # one-time: downloads ~225 MB of textures, models and skies into assets/
+npm run assets    # one-time: downloads the textures, models, skies and soldiers into assets/
 npm start         # starts server/server.mjs on port 8000
 ```
 
@@ -136,7 +138,7 @@ How it plays:
 
 | Situation | What to do |
 |---|---|
-| Same Wi-Fi / home network | `npm start` prints a "Friends on your network" address. The invite link already uses it. If friends can't connect, allow Node through the macOS firewall when it asks (System Settings → Network → Firewall). |
+| Same Wi-Fi / home network | `npm start` prints a "Friends on your network" address. The invite link already uses it. If friends can't connect, let Node through your computer's firewall (macOS: System Settings → Network → Firewall; Windows asks the first time you run `npm start`). |
 | Over the internet, quick | Run a tunnel that forwards a public address to port 8000, such as `cloudflared tunnel --url http://localhost:8000` (Cloudflare) or ngrok. Open the game through the tunnel address yourself too, so the invite link uses it. Every friend downloads the textures through your home upload, so the first load is slow. |
 | Over the internet, private | A mesh VPN like Tailscale puts your friends on a private network with you, so they can use your Tailscale address and port 8000. |
 | Always online | Deploy the project to any host that runs Node and supports WebSockets: build with `npm install && npm run assets`, start with `npm start`. The server reads the `PORT` environment variable. See **Hosting publicly** next. |
@@ -163,7 +165,9 @@ counts.
 
 **Set it up.**
 
-1. Copy the project to the server, without `node_modules/` and `.certs/`, and run `npm install`.
+1. Get the project onto the server with `git clone https://github.com/Josh221/fps_game.git`, then
+   run `npm install` and `npm run assets` in it. (If you copy a folder you already have instead,
+   leave out `node_modules/` and `.certs/`.)
 2. Start it so that only the tunnel can reach it, and without its own HTTPS:
    `HOST=127.0.0.1 HTTPS_PORT=0 PORT=8000 npm start`. To keep it running after you log out and
    after reboots, use pm2 (`pm2 start server/server.mjs --name dustline`, with the same variables
@@ -589,8 +593,9 @@ server/
 
 ## Credits
 
-See [assets/CREDITS.md](assets/CREDITS.md). Textures, models and skies come from Poly Haven (CC0)
-and the trees from EZ-Tree (MIT).
+Textures, models and skies come from [Poly Haven](https://polyhaven.com) (CC0), and the trees from
+EZ-Tree (MIT, loaded from a CDN). The Poly Haven files aren't stored in this repository:
+`npm run assets` downloads them and writes the full list, asset by asset, to `assets/CREDITS.md`.
 
 The soldiers and their animations are from the Microsoft Rocketbox avatar library
 (github.com/microsoft/Microsoft-Rocketbox), released under the MIT licence; the licence text is in
