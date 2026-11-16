@@ -284,14 +284,31 @@ map's `materials`.
   the idle holds them. Pinning them to each clip's own average instead put a running soldier a
   metre ahead of where he really was, sliding back as he slowed down. Engines call the opposite
   approach "root motion": the clip's travel moves the character, and the code follows the animation.
-- **Dying** (`_dying`): a "fake ragdoll". Real ragdolls simulate every limb with a physics
-  engine. Here a dead soldier goes limp over about a second: arms and head slerp to hanging, the
-  knees buckle, and the whole body tips over about his feet with gravity's ease-in (the angle
-  grows as t²), landing flat with a twist and his arms sprawled. The gun is re-parented to the
-  world and falls on its own. `_fallWay` first checks which way there's 1.85 m of clear floor, so
-  bodies don't fall through walls, onto barriers or off roofs. With no room he crumples onto his
-  knees instead. In co-op every player animates the death separately, so the dice are seeded with
-  the soldier's network id and everyone sees the same fall.
+- **Dying** (`_dying`, `_startDeath`): a "fake ragdoll". Real ragdolls simulate every limb with a
+  physics engine. Here a dead soldier goes limp over about a second: arms and head slerp to
+  hanging, the knees buckle, and the whole body tips over about his feet with gravity's ease-in
+  (the angle grows as t²). What stops every body looking the same is a handful of dice:
+  - **Which way.** The killing shot's direction (`killDir`, set in `enemy.js`) knocks him that way,
+    give or take 40°; sometimes his legs just go and he drops any old way. The fall can be at any
+    angle, so it's a rotation about a horizontal axis at right angles to it: `axis = up × dir`.
+  - **The twist.** On the way down he also turns about his own length (a quaternion applied
+    *before* the tip-over, `model.quaternion = tilt × spin`), whichever way is the shorter turn to
+    lying on his back or his front, never quite square. Which side faces up decides how far he's
+    lifted off the ground (his back, his plate carrier or his shoulder).
+  - **The sprawl.** Arms by his sides, flung out or past his head, elbows bent or straight; legs
+    apart, maybe one knee drawn up; a bend in the back; the head turned. The trick that keeps
+    limbs on the ground: lying down, "out from his side" means *across the ground*, so the limbs
+    turn about the world's vertical axis. A limb that's lying flat stays flat whatever angle it
+    turns through.
+  - **The gun.** He lets go straight away, part way down (his arms stay on it until then) or as he
+    hits the ground. It keeps the speed his hands had, plus a toss, and `gundrop.js` takes over
+    (see section 17).
+  `_roomToFall` checks there's 1.85 m of clear floor that way first, so bodies don't fall through
+  walls, onto barriers or off roofs, trying further and further round. Boxed in, he crumples onto
+  his knees instead. In co-op every player animates the death separately: the dice are seeded with
+  the soldier's network id, and the host's `kill` message carries the shot's direction. Note that
+  **every die is rolled up front**, before anything that might take a different branch on another
+  computer (the same rule as building the level; see section 15).
 - **Layered poses with two-bone IK:** the clips don't hold a rifle. Given where a hand must be,
   the shoulder-elbow-wrist triangle has exactly one shape (the law of cosines gives the elbow
   angle from the three lengths). A "pole" point chooses which way the elbow sticks out. Then the
@@ -327,8 +344,8 @@ is what games like Arma do, so what you see matches what your squad sees.
   way the hand points, `p` the way the palm faces, `curl` how far each finger bends). Then look at
   your hands in first person.
 - Make the AI hold their rifles higher at the low ready: the `lowW` line in `Rig.pose`.
-- Make deaths slower and heavier: change the `1.05` (seconds) in `const k = Math.min(1, D.t / 1.05)`
-  in `_dying`. Or make the arms sprawl wider: the `spread` numbers just above it.
+- Make deaths slower and heavier: change `dur` (seconds) in `_startDeath`. Or make the arms
+  sprawl wider: the numbers in its `arm()` (out from the side, then the elbow bend, in radians).
 - Add a fifth soldier: add a Rocketbox military folder to `SOLDIERS` in
   `tools/fetch-characters.mjs`, run `npm run characters`, and add an option to `AVATAR.soldier`.
 
@@ -375,6 +392,7 @@ That's what competitive games use, because then no player's computer can be trus
 | Your movement, ammo, health | your computer | a `Teammate`, blended between updates |
 | Whether your bullet hit an enemy | your computer, sent to the host as a "hit report" | a replica bullet that can't hurt anyone |
 | Whether an enemy bullet hit you | your computer | the same bullet, harmless to them |
+| Who picks up a gun or ammo off a body | the host (a friend asks with `lq` and waits) | an `lt` message: who took what (loot.js) |
 
 **Same level on every computer.** The level is never sent over the network. Each browser builds
 it itself with a *seeded* random number generator (`mulberry32` in textures.js): the same seed gives
@@ -627,6 +645,29 @@ way: change the camera's FOV (`SetFieldOfView` / `Camera.fieldOfView`).
   If it's inside the sphere, the AI's line of sight is blocked.
 - This is a classic split in games: the rendering and the gameplay logic are separate models
   of the same thing.
+
+**Taking from the fallen** (`loot.js`, `gundrop.js`):
+- **What they carry.** `ENEMY_ISSUE` in config.js lists the enemy's guns as ordinary loadout
+  entries, `{ id: 'dmr', mods: { optic: 'acog' } }`, plus how the AI fires each (rpm, burst
+  length, damage). `issueFor(id)` in enemy.js rolls a soldier's gun and spare magazines from his
+  network id, so every co-op computer works out the same answer without sending it. Because they
+  are real loadout entries, a gun you pick up is built by the same `buildWeapon()` as one from the
+  armory. Nothing about it is special.
+- **Calibres.** Each gun in `GUNS` has a `cal`. Ammo off a body only goes into a gun of the same
+  calibre, up to that gun's normal reserve. One field gives you a reason to look at what the dead
+  man was carrying.
+- **Picking what you mean.** Everything within reach gets a score: the angle between where you're
+  looking and the thing, plus a little for distance. The lowest wins. It's the same test as an
+  aim-assist cone or "use" in Half-Life. Taking ammo is a press, but swapping a gun is a *hold*
+  (0.4 s), because a press is too easy to do by accident. The hold only counts on the gun you
+  pressed at, so holding F after a swap can't swap you straight back.
+- **A dropped gun** (`gundrop.js`) is a tiny rigid-body simulation: gravity, a spin, a floor
+  (`world.floorBelow`: terrain, or the top of a roof or a crate), bounces off walls, friction that
+  really stops it (a fixed slowing, not a percentage), and a capsule round the body so the gun
+  slides off him rather than ending up hidden underneath. It runs on a **fixed time step**
+  (1/120 s, with the leftover time carried to the next frame). Physics stepped by the frame time
+  behaves differently at 30 and 144 FPS, while fixed steps behave the same everywhere. Box2D,
+  PhysX and Unity's `FixedUpdate` all work this way.
 
 **Try this:**
 - Add a new attachment, such as a laser that cuts hip-fire spread (`['hipSpread', '*', 0.7]`).

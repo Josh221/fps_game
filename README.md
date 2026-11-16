@@ -308,7 +308,27 @@ the forest.
 | R | Reload | V | Fire mode (auto / semi) |
 | 1 / 2 | Primary / sidearm | H | Apply bandage |
 | Mouse wheel | Swap weapon. While aiming with the sniper scope: zoom in (up) / out (down) | | |
-| F | Resupply at an ammo crate | Esc | Pause |
+| F | Resupply at an ammo crate. At a body: take the ammo that fits your guns. Hold F at a gun on the ground: swap yours for it | Esc | Pause |
+
+### The fallen
+
+Every soldier falls his own way. The killing shot knocks him over in the direction it was going,
+he twists as he goes down, and he ends up on his back, his front or half on his side, arms and
+legs sprawled differently each time. His gun leaves his hands straight away, part way down or as
+he hits the ground, then tumbles and skids to a stop, so it can lie a couple of metres off or
+right by his hand. In co-op the whole squad sees the same fall.
+
+What he carried is yours to take. Enemies carry different guns (mostly carbines, some SMGs,
+scoped DMRs and LMGs), each with spare magazines in his pouches:
+
+- **Look at the body, press F** to take the ammo that fits your guns. Ammo goes by calibre: a dead
+  SMG gunner's 9 mm feeds your sidearm, a marksman's 7.62 feeds a DMR or a bolt-action, and 5.56
+  feeds a carbine or an LMG. You can carry as much as your gun's normal reserve.
+- **Look at his gun, hold F** to swap it for the one in that slot. Yours drops at your feet with
+  the rounds you had for it, so you (or a squadmate) can swap back. You get your own guns back
+  when you respawn.
+
+In co-op the host decides who gets what, so two players grabbing the same rifle can't both have it.
 
 ## Loadouts and the gunsmith
 
@@ -510,8 +530,8 @@ src/
   world.js       collision boxes + terrain, movement, raycasts
   nav.js         A* pathfinding grid for the AI, plus roof "decks" joined by ladders (off-mesh links)
   ladder.js      fixed steel ladders: the prefab and the data players and soldiers climb with
-  character.js   soldiers: loads the Rocketbox models, animation blending, two-bone IK arms + finger grips, hitboxes
-  enemy.js       enemy AI state machine + squad manager
+  character.js   soldiers: loads the Rocketbox models, animation blending, two-bone IK arms + finger grips, hitboxes, deaths
+  enemy.js       enemy AI state machine + squad manager, and which gun each soldier carries
   player.js      movement, stance, lean, stamina, health, camera
   weapon.js      ammo, fire modes, reloads, spread, recoil
   viewmodel.js   first-person gun + hands: sway/bob/recoil, bolt cycling, bipod legs
@@ -524,6 +544,8 @@ src/
   ballistics.js  bullet simulation, penetration, hit detection
   effects.js     particles, bullet holes, tracers, muzzle flash, brass
   audio.js       synthesised 3D audio (gunfire, baked footstep takes, breathing, indoor echo)
+  gundrop.js     a dropped gun: tumbles, bounces, skids and lies on its side (physics with a fixed time step)
+  loot.js        taking ammo and guns off the fallen (calibres, gun swaps, the host deciding in co-op)
   coop.js        co-op: lobby protocol, who decides what, snapshots, enemy "puppets", hit reports
   lobby.js       the lobby screen and the "open games" list
   voice.js       squad voice chat (WebRTC, push-to-talk)
@@ -548,7 +570,9 @@ server/
 
 - **Gameplay** numbers are in [src/config.js](src/config.js). That includes the difficulty presets
   (`DIFFICULTY`), mission lengths and co-op wave scaling (`GAME`), and co-op network settings
-  (`NET`: update rate, respawn time, countdown, squad uniform colour).
+  (`NET`: update rate, respawn time, countdown, squad uniform colour). What enemies carry and how
+  they fire it is `ENEMY_ISSUE`: set a gun's `share` to 0 to stop enemies using it, or add your own
+  entry. `LOOT` sets how close you need to be to a body and how long to hold F to swap guns.
 - **Each map's look** is set in its map file: which sky image, exposure, fog, color grade,
   textures and soldier uniform color. Try swapping Dustline's `hdri` for another sky listed in
   [tools/fetch-assets.mjs](tools/fetch-assets.mjs).
