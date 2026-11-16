@@ -303,7 +303,7 @@ async function init() {
     audio.hitmarker(killed);
   };
   enemies.onKill = (e, headshot, info) => {
-    if (coop.isHost) coop.sendKill(info?.shooter, headshot);
+    if (coop.isHost) coop.sendKill(info?.shooter, headshot, e);
     if (mine(info)) confirmKill(headshot);
     else hud.killfeed(`${info.shooter.name} — HOSTILE DOWN`, false);
   };

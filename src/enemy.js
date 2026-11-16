@@ -58,6 +58,15 @@ export function issueFor(id) {
   };
 }
 
+// Which way the shot (or blast) that killed someone was going: it knocks
+// the body over that way (character.js). info = a hit, as onBulletHit gets it.
+export function killDirection(info, victimPos) {
+  const d = info?.dir;
+  if (d && d.lengthSq() > 0.01) return d.clone().normalize();
+  if (info?.from) return victimPos.clone().sub(info.from).setY(0).normalize(); // (a friend's hit report has no direction)
+  return null;
+}
+
 class Enemy {
   constructor(mgr, spawn) {
     this.mgr = mgr;
@@ -542,6 +551,7 @@ class Enemy {
   }
 
   _die(info) {
+    this.body.killDir = killDirection(info, this.pos); // he falls the way the shot knocked him
     this.alive = false;
     this.state = 'dead';
     this.deathT = 0;

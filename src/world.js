@@ -122,6 +122,17 @@ export class World {
 
   groundHeight(x, z) { return this.terrain ? this.terrain.heightAt(x, z) : 0; }
 
+  // The highest thing to land on at (x, z), at or below height y: the top of a
+  // box (a roof, a floor, a crate), or else the terrain. Dropped guns use it.
+  floorBelow(x, y, z) {
+    let top = this.groundHeight(x, z);
+    if (y <= top) return top;
+    for (const c of this._collect(x - 0.02, top, z - 0.02, x + 0.02, y, z + 0.02)) {
+      if (c.solid && c.max.y <= y && c.max.y > top) top = c.max.y; // (not the invisible walls at the map's edge)
+    }
+    return top;
+  }
+
   // What are you standing on? (footstep sounds) The top of a box right under
   // your feet, then a floor finish (addFloor), otherwise the terrain's dominant texture.
   surfaceUnder(p) {

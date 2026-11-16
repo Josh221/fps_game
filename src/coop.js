@@ -34,7 +34,7 @@
 //
 // GAME MESSAGES (JSON; `t` is the type, arrays keep them short):
 //   friend -> host   st  my state     sh  I fired     ht  I hit enemy #id    nz  I made a noise
-//   host -> friends  snap  every soldier's state     es  an enemy fired     kill  enemy down (and who got him)
+//   host -> friends  snap  every soldier's state     es  an enemy fired     kill  enemy down (who got him, which way he fell)
 //                    ev  wave started / area secure / mission won           score  everyone's kills and deaths
 //   both ways        sh  a squadmate fired     gr  a grenade was thrown     spot  an enemy was spotted
 //
@@ -252,7 +252,7 @@ export class CoopSession {
     // game: friend side
     net.on('snap', (m) => this._snapshot(m));
     net.on('es', (m) => this._enemyShot(m));
-    net.on('kill', (m) => this.onKill?.(m.by === this.myId, !!m.hs, this.nameOf(m.by)));
+    net.on('kill', (m) => this._killFrom(m));
     net.on('ev', (m) => this.onEvent?.(m));
     net.on('score', (m) => { if (this.isClient && Array.isArray(m.s)) this.scoreRows = m.s; });
   }
@@ -423,12 +423,15 @@ export class CoopSession {
     this.net?.send({ t: 'es', e: enemy.netId, o: arr2(origin), d: [r4(dir.x), r4(dir.y), r4(dir.z)], tr: tracer ? 1 : 0 });
   }
 
-  sendKill(shooter, headshot) {
+  // An enemy died. d: which way the shot that killed him was going (x, z),
+  // so friends' copies of him fall the same way as the host's (character.js)
+  sendKill(shooter, headshot, enemy) {
     const by = !shooter || shooter === this.player ? this.myId : shooter.id;
     const s = this._score(by);
     s.kills++;
     if (headshot) s.headshots++;
-    this.net?.send({ t: 'kill', by, hs: headshot ? 1 : 0 });
+    const k = enemy?.body.killDir;
+    this.net?.send({ t: 'kill', by, hs: headshot ? 1 : 0, e: enemy?.netId, d: k ? [r3(k.x), r3(k.z)] : undefined });
   }
 
   broadcast(msg) { if (this.isHost) this.net?.send(msg); }
@@ -577,6 +580,14 @@ export class CoopSession {
       const tm = a[0] !== this.myId && this.teammates.get(a[0]);
       if (tm) tm.push(m.T, a.slice(1).map(Number));
     }
+  }
+
+  // The host says an enemy died. His puppet here hasn't fallen yet (we draw
+  // everyone 100 ms in the past), so there's time to tell it which way to go.
+  _killFrom(m) {
+    const pup = this.isClient ? this.puppets.get(m.e) : null;
+    if (pup && Array.isArray(m.d)) pup.body.killDir = new THREE.Vector3(+m.d[0] || 0, 0, +m.d[1] || 0);
+    this.onKill?.(m.by === this.myId, !!m.hs, this.nameOf(m.by));
   }
 
   // An enemy fired on the host. Same bullet here, and it CAN hurt our player.

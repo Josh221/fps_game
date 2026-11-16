@@ -24,6 +24,7 @@
 //   • a kneeling pose for cover, built from a few joint rotations;
 //   • spine bends to aim up/down, lean, prone, climbing, falling dead.
 // Hit boxes ride on the bones, so headshots land where the head really is.
+// Dying is procedural too: see "death" in SoldierBody below.
 //
 // The same solver poses YOUR arms in first person (viewmodel.js): the same
 // model, sleeves and gloves your squad sees, with your hands on the gun.
@@ -36,6 +37,7 @@ import { Wardrobe } from './avatar.js';
 import { buildGun } from './gunsmith.js';
 import { buildWeapon, encodeGun } from './loadout.js';
 import { mulberry32 } from './textures.js';
+import { GunDrop } from './gundrop.js';
 
 // The game's names for the bones it uses -> the Biped skeleton's names
 export const BONE = {
@@ -65,9 +67,10 @@ const PARTS = ['body', 'head', 'helmet', 'equipment'];
 // proportion to the soldier's real speed keeps the feet from sliding.
 const WALK_SPEED = 1.01, RUN_SPEED = 2.88;
 
-const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+const FLAT = (Math.PI / 2) * 0.98; // a body lying on the ground: tipped over (nearly) 90°
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _qc = new THREE.Quaternion();
-const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _eLie = new THREE.Euler();
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
 
 // ---------------------------------------------------------------- loading
 // Everything for the soldiers: models, textures and clips (assets/characters/rocketbox/).
@@ -766,67 +769,83 @@ export class SoldierBody {
   }
 
   // ------------------------------------------------------------------ death
-  // A procedural collapse (a "fake ragdoll"): over about a second the knees
-  // buckle, the body falls backwards or forwards with a twist, the arms and
-  // head go limp, and he ends up lying flat. The gun drops out of his hands
-  // and falls to the ground beside him. Each death picks its own direction,
-  // twist and sprawl, so a firefight doesn't leave rows of identical bodies.
-  // (Real ragdolls simulate every limb with a physics engine; this gets most
-  // of the look for a few rotations.)
+  // A procedural collapse (a "fake ragdoll"). Real ragdolls simulate every
+  // limb with a physics engine; this gets most of the look from a few
+  // rotations, and every death rolls its own dice for them:
+  //   • WHICH WAY: the killing shot knocks him the way it was going (killDir,
+  //     give or take; now and then his legs just go and he drops any old
+  //     way). He topples like anything falling over, slowly then fast, and
+  //     twists as he goes, so he lands on his back, his front, or half turned.
+  //   • HOW HE LIES: arms by his sides, flung out or up past his head, elbows
+  //     bent or straight; legs together or apart, maybe one knee drawn up and
+  //     fallen outwards; a bend in the back; the head lolled to one side.
+  //   • THE GUN: he lets go of it straight away, part way down, or only as he
+  //     hits the ground. Then it flies, tumbles and skids to a stop on its
+  //     own (gundrop.js): a couple of metres off, or right by his hand.
+  // So a firefight doesn't leave rows of identical bodies with their rifles at their feet.
+  //
+  // In co-op the host and each friend animate a death separately. The dice
+  // are seeded with the soldier's network id, and the host sends which way
+  // the killing shot was going (coop.js), so everyone sees the same fall.
   _dying(dt, s) {
     const rig = this.rig, bones = this.bones;
-    if (!this.dead) {
-      // In co-op the host and each friend animate this death separately; seeding
-      // the dice with the soldier's network id makes them all see the same fall
-      this.deaths = (this.deaths || 0) + 1;
-      const r = this.seed !== undefined ? mulberry32(((this.seed | 0) * 7919 + this.deaths) >>> 0) : Math.random;
-      this.dead = {
-        t: s.deathT >= 1 ? 3 : 0, // already dead when we first saw him (joined late): no fall, just lying there
-        from: Object.fromEntries([...ARM_BONES, ...FINGER_BONES, ...LEG_BONES, ...SPINE_BONES].map((n) => [n, bones[n].quaternion.clone()])),
-        rootFrom: this.rootBone.position.clone(),
-        startPitch: this.model.rotation.x, startPos: this.model.position.clone(),
-        fall: this._fallWay((s.prone || 0) > 0.5, r),
-        roll: (r() - 0.5) * 0.5, twist: (r() - 0.5) * 0.8,
-        spread: [0.1 + r() * 0.45, 0.1 + r() * 0.45], head: (r() < 0.5 ? -1 : 1) * (0.35 + r() * 0.45),
-        knee: 0.5 + r() * 0.4,
-      };
-      this._dropGun(r);
-    }
-    const D = this.dead;
+    if (!this.dead) this._startDeath(s);
+    const D = this.dead, P = D.pose;
     D.t += dt;
-    const k = Math.min(1, D.t / 1.05);
+    const k = Math.min(1, D.t / D.dur);
     const sm = (a, b) => { const t = Math.min(1, Math.max(0, (k - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const slump = D.way === 'slump';
     // Limbs: arms, fingers, spine and head relax towards the standing rest pose
-    // (lying down, that's arms along the body); the knees buckle, then mostly straighten
-    const W = D.fall, slump = W.way === 'slump';
-    const limp = sm(0, 0.45), buckle = (slump ? sm(0, 0.5) : sm(0, 0.3) * D.knee), settle = slump ? 0 : sm(0.55, 1);
+    // (lying down, that's arms along the body). If he hangs on to his gun as
+    // he goes down, his arms stay on it until he lets go.
+    const limp = sm(D.letGo, D.letGo + 0.45), buckle = slump ? sm(0, 0.5) : sm(0, 0.3) * P.knee;
+    const straighten = slump ? 0 : sm(0.55, 1);
     for (const n in rig.idleArm) bones[n].quaternion.slerpQuaternions(D.from[n], rig.idleArm[n], limp);
     for (const n of SPINE_BONES) bones[n].quaternion.slerpQuaternions(D.from[n], rig.idleBody[n], sm(0, 0.5));
     if (slump) {
       for (const n of LEG_BONES) bones[n].quaternion.slerpQuaternions(D.from[n], rig.crumpleLegs[n], buckle);
       this.rootBone.position.lerpVectors(D.rootFrom, rig.crumpleRoot, buckle);
-    } else {
-      for (const n of LEG_BONES) bones[n].quaternion.slerpQuaternions(D.from[n], rig.kneelLegs[n], buckle).slerp(rig.idleBody[n], settle * 0.75);
-      this.rootBone.position.lerpVectors(D.rootFrom, rig.kneelRoot, buckle * (1 - settle) * 0.6);
+    } else { // the knees buckle, then (mostly) straighten again as he lands
+      for (const n of LEG_BONES) bones[n].quaternion.slerpQuaternions(D.from[n], rig.kneelLegs[n], buckle).slerp(rig.idleBody[n], straighten * P.settle);
+      this.rootBone.position.lerpVectors(D.rootFrom, rig.kneelRoot, buckle * (1 - straighten) * 0.6);
     }
-    // The fall: accelerating, like anything toppling under gravity. Backwards
-    // and forwards tip about x, sideways about z; a slump just sags forward where he kneels.
+    // The fall: accelerating, like anything toppling under gravity. He tips
+    // over about the line across his fall (D.axis) while turning about his own
+    // length (D.spin). A slump just sags forward where he kneels.
     const f = sm(0.08, 0.85) ** 2;
-    const flat = (Math.PI / 2) * 0.98, side = W.way === 'left' || W.way === 'right';
-    const pitchTo = W.way === 'back' ? flat : W.way === 'front' ? -flat : W.way === 'slump' ? -0.1 : 0;
-    const rollTo = W.way === 'left' ? flat : W.way === 'right' ? -flat : 0;
-    this.model.rotation.set(D.startPitch + (pitchTo - D.startPitch) * f, D.twist * f, rollTo * f + (side ? 0 : D.roll * f));
+    if (slump) this.model.rotation.set(-0.1 * f, P.twist * f, P.roll * f);
+    else {
+      _q.setFromAxisAngle(D.axis, D.tilt0 + (FLAT - D.tilt0) * f);
+      this.model.quaternion.multiplyQuaternions(_q, _q2.setFromAxisAngle(UP, D.spin * sm(0.05, 0.95)));
+    }
     // lying flat, his back (or his chest and plate carrier, or his shoulder) keeps him off the ground
-    const lift = slump ? 0 : W.way === 'back' ? 0.11 : 0.15;
-    this.model.position.set(D.startPos.x * (1 - f), D.startPos.y + lift * sm(0.55, 0.9), D.startPos.z);
+    this.model.position.set(D.startPos.x * (1 - f), D.startPos.y + D.lift * sm(0.55, 0.9), D.startPos.z);
     this.root.updateMatrixWorld(true);
-    // Once he's down the arms sprawl a little from his sides, and the head rolls over
+
+    // Once he's down, the sprawl. Lying down, "out from his side" means across
+    // the ground, so the limbs turn about the vertical (blended in from his own
+    // forward axis as he goes over): that keeps arms and legs on the ground.
     this.model.getWorldQuaternion(_q3);
-    const fwd = _v2.set(0, 0, -1).applyQuaternion(_q3).normalize(), right = _v3.set(1, 0, 0).applyQuaternion(_q3).normalize();
+    const fwd = _v2.set(0, 0, -1).applyQuaternion(_q3), along = _v3.set(0, 1, 0).applyQuaternion(_q3), right = _v5.set(1, 0, 0).applyQuaternion(_q3);
+    const flat = slump ? fwd : _v4.set(0, fwd.y < 0 ? -1 : 1, 0).lerp(fwd, 1 - f).normalize();
     const sprawl = slump ? 0 : sm(0.6, 1);
-    rotateWorld(bones[B('LeftArm')], fwd, D.spread[0] * sprawl);
-    rotateWorld(bones[B('RightArm')], fwd, -D.spread[1] * sprawl);
-    rotateWorld(bones[B('Head')], fwd, D.head * sm(0.2, 0.9));
+    if (sprawl > 0) {
+      const [la, le] = P.arms[0], [ra, re] = P.arms[1], bent = P.bent;
+      rotateWorld(bones[B('Spine1')], flat, P.curve * sprawl); // a bend in the back
+      rotateWorld(bones[B('Spine2')], flat, P.curve * 0.6 * sprawl);
+      rotateWorld(bones[B('LeftArm')], flat, la * sprawl);     // + = out from his side (mirrored for the right)
+      rotateWorld(bones[B('LeftForeArm')], flat, le * sprawl);
+      rotateWorld(bones[B('RightArm')], flat, -ra * sprawl);
+      rotateWorld(bones[B('RightForeArm')], flat, -re * sprawl);
+      // one knee drawn up: the thigh swings out and the shin folds back in
+      rotateWorld(bones[B('LeftUpLeg')], flat, (P.legs[0] + (bent === 0 ? P.bendHip : 0)) * sprawl);
+      rotateWorld(bones[B('RightUpLeg')], flat, -(P.legs[1] + (bent === 1 ? P.bendHip : 0)) * sprawl);
+      if (bent >= 0) rotateWorld(bones[B(bent ? 'RightLeg' : 'LeftLeg')], flat, (bent ? 1 : -1) * P.bendKnee * sprawl);
+    }
+    // The head lolls over to one side
+    const loll = sm(0.2, 0.9);
+    rotateWorld(bones[B('Head')], along, P.turn * loll);
+    rotateWorld(bones[B('Head')], fwd, P.tilt * loll);
     // Boxed in (a corner, a narrow ledge): he crumples onto both knees, sinks
     // back towards his heels and folds forward, chin on his chest
     if (slump) {
@@ -839,20 +858,92 @@ export class SoldierBody {
     this._gunFall(dt);
   }
 
-  // Which way can he fall? A body that falls straight through a wall or onto
-  // a concrete barrier looks broken, so look for room first: about 1.8 m of
-  // clear space at body height, with a floor under it (roofs have edges).
-  // Lying prone he just goes face down; boxed in, he crumples where he is.
-  _fallWay(prone, r) {
-    if (prone) return { way: 'front' };
+  // Roll the dice for a death (see above)
+  _startDeath(s) {
+    const bones = this.bones;
+    this.deaths = (this.deaths || 0) + 1;
+    const r = this.seed !== undefined ? mulberry32(((this.seed | 0) * 7919 + this.deaths) >>> 0) : Math.random;
+    // Every number is drawn now, in the same order whatever the room or the
+    // shot turn out to be, so a co-op friend's dice never get out of step with the host's
+    const dice = Array.from({ length: 48 }, () => r());
+    let i = 0;
+    const next = () => dice[i++];
+    const prone = (s.prone || 0) > 0.5;
+
+    // WHICH WAY: an angle about the vertical in his own frame, the way his
+    // head goes: 0 = backwards, π = forwards, π/2 = to his right, -π/2 = his left
+    const follow = next() < 0.7, jitter = (next() - 0.5) * 1.5, pick = next(), pickJitter = (next() - 0.5) * 1.2, side = next() < 0.5 ? 1 : -1;
+    let want = (pick < 0.45 ? 0 : pick < 0.8 ? Math.PI : (side * Math.PI) / 2) + pickJitter; // no shot to go by: mostly back or front
+    if (this.killDir && follow) {
+      _v1.copy(this.killDir).applyQuaternion(_q.copy(this.root.quaternion).invert()); // the shot, in his frame
+      if (Math.hypot(_v1.x, _v1.z) > 0.2) want = Math.atan2(_v1.x, _v1.z) + jitter;
+    }
+    const searchSide = next() < 0.5 ? 1 : -1;
+    const phi = prone ? Math.PI : this._roomToFall(want, searchSide); // lying prone he just goes face down; null = boxed in
+    const way = phi === null ? 'slump' : 'fall', p = phi ?? 0;
+    // He turns as he falls and ends up on his back or his front, whichever
+    // is less of a turn (a coin toss if he goes over sideways), never quite square
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const onBack = wrap(p), onFront = wrap(p - Math.PI), coin = next() < 0.5, skew = (next() - 0.5) * 0.6;
+    let spin = Math.abs(Math.abs(onBack) - Math.abs(onFront)) < 0.35 ? (coin ? onBack : onFront) : Math.abs(onBack) < Math.abs(onFront) ? onBack : onFront;
+    spin = prone ? skew * 0.5 : spin + skew;
+    const up = Math.cos(spin - p); // 1 = on his back, -1 = on his front, 0 = on his side
+    const dur = 0.85 + next() * 0.45; // a heavier or lighter fall
+
+    // HOW HE LIES: [out from his side, elbow bend] for each arm
+    const arm = () => {
+      const u = next(), a = next(), b = next(), c = next();
+      if (u < 0.4) return [0.05 + a * 0.3, b * 0.35];                              // by his side
+      if (u < 0.75) return [0.6 + a * 0.7, (c < 0.5 ? 1 : -1) * (0.2 + b * 0.8)];   // flung out, elbow bent up or down
+      return [1.9 + a * 0.75, c < 0.5 ? b * 0.5 : -(0.4 + b * 1.0)];                 // up past his head
+    };
+    const pose = {
+      arms: [arm(), arm()],
+      legs: [0.03 + next() * 0.3, 0.03 + next() * 0.3], // apart
+      bent: ((u) => (u < 0.18 ? 0 : u < 0.36 ? 1 : -1))(next()), // a knee drawn up: 0 left, 1 right, -1 neither
+      bendHip: 0.45 + next() * 0.45, bendKnee: 0.9 + next() * 0.8,
+      curve: (next() - 0.5) * 0.5,
+      turn: (next() < 0.5 ? -1 : 1) * (0.3 + next() * 0.8), tilt: (next() - 0.5) * 0.4,
+      knee: 0.5 + next() * 0.4, settle: 0.6 + next() * 0.4,
+      twist: (next() - 0.5) * 0.8, roll: (next() - 0.5) * 0.5, // (a slump)
+    };
+
+    // THE GUN: when he lets go (a fraction of the fall), and how it leaves his hands
+    const g = Array.from({ length: 10 }, next);
+    const letGo = g[0] < 0.4 ? 0 : g[0] < 0.75 ? 0.15 + g[1] * 0.35 : 0.6 + g[1] * 0.25;
+    const throwAt = p + (g[2] < 0.5 ? 1 : -1) * (0.5 + g[3] * 1.8); // off to one side or behind him, not where he's falling
+    const speed = (0.3 + g[4] * 1.6) * (letGo > 0.5 ? 0.4 : 1);      // (barely thrown if he held on until he hit the ground)
+    const toss = new THREE.Vector3(Math.sin(throwAt) * speed, 0.3 + g[5] * 0.9, Math.cos(throwAt) * speed);
+    const spinG = new THREE.Vector3((g[6] - 0.5) * 8, (g[7] - 0.5) * 10, (g[8] - 0.5) * 14);
+    // where his body will lie, so the gun slides off him rather than ending up underneath
+    const d = new THREE.Vector3(Math.sin(p), 0, Math.cos(p)), base = new THREE.Vector3(0, 0, this.model.position.z);
+    const avoid = way === 'slump' ? { a: new THREE.Vector3(), b: new THREE.Vector3(0, 0, -0.55), r: 0.35 } // (kneeling, folded forward)
+      : { a: base.clone().addScaledVector(d, 0.15), b: base.clone().addScaledVector(d, 1.6), r: 0.3 };
+
+    this.dead = {
+      t: s.deathT >= 1 ? 3 : 0, // already dead when we first saw him (joined late): no fall, just lying there
+      dur, way, pose, letGo,
+      axis: new THREE.Vector3(Math.cos(p), 0, -Math.sin(p)), // horizontal, across the fall: he tips over about it
+      tilt0: prone ? -this.model.rotation.x : 0, spin,
+      lift: way === 'slump' ? 0 : up > 0 ? 0.18 - 0.07 * up : 0.18 + 0.03 * up,
+      from: Object.fromEntries([...ARM_BONES, ...FINGER_BONES, ...LEG_BONES, ...SPINE_BONES].map((n) => [n, bones[n].quaternion.clone()])),
+      rootFrom: this.rootBone.position.clone(),
+      startPos: this.model.position.clone(),
+    };
+    this.gunDrop = { letGo, toss, spin: spinG, avoid, drop: null, prev: null, rootY: 0, taken: false };
+  }
+
+  // Is there room to fall that way? A body that falls straight through a wall
+  // or onto a concrete barrier looks broken, so look for about 1.8 m of clear
+  // space at body height, with a floor under it (roofs have edges). Tries the
+  // way he was knocked first, then further and further round. null = boxed in.
+  _roomToFall(want, sign) {
     const w = this.f.world;
-    const ways = r() < 0.6 ? ['back', 'front', 'left', 'right'] : ['front', 'back', 'right', 'left'];
-    if (!w) return { way: ways[0] };
+    if (!w) return want;
     this.root.updateMatrixWorld(true);
     const o = this.root.getWorldPosition(new THREE.Vector3()), q = this.root.getWorldQuaternion(new THREE.Quaternion());
-    const DIR = { back: [0, 0, 1], front: [0, 0, -1], left: [-1, 0, 0], right: [1, 0, 0] };
-    const roomy = (way) => {
-      const d = new THREE.Vector3(...DIR[way]).applyQuaternion(q);
+    const roomy = (phi) => {
+      const d = new THREE.Vector3(Math.sin(phi), 0, Math.cos(phi)).applyQuaternion(q);
       for (const dist of [0.5, 1.0, 1.45, 1.85]) {
         const x = o.x + d.x * dist, z = o.z + d.z * dist, ground = w.groundHeight(x, z);
         if (w.boxBlocked(x - 0.15, o.y + 0.12, z - 0.15, x + 0.15, o.y + 0.6, z + 0.15)) return false; // something in the way
@@ -862,36 +953,40 @@ export class SoldierBody {
       }
       return true;
     };
-    const way = ways.find(roomy);
-    return { way: way || 'slump' };
+    for (const off of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9, Math.PI]) if (roomy(want + off * sign)) return want + off * sign;
+    return null;
   }
 
-  // Let go of the gun: it stays where it was in the world, now on its own
-  _dropGun(r) {
-    const g = this.gun;
-    if (!g || g.parent !== this.gunHolder) return;
-    this.root.updateMatrixWorld(true);
-    this.root.attach(g); // (the root stays upright while the body falls, so the gun falls on its own)
-    this.gunDrop = { v: 0, side: r() < 0.5 ? 1 : -1, slide: 0.4 + r() * 0.6 };
-    if (this.dead.t >= 3) this._gunFall(10); // already lying there
-  }
-
-  // The dropped gun falls, turns onto its side and comes to rest on the ground
+  // The gun: in his hands until he lets go, then on its own (gundrop.js)
   _gunFall(dt) {
-    const g = this.gun, G = this.gunDrop;
-    if (!G || g.parent !== this.root || G.rest) return;
-    for (let left = dt; left > 1e-4; left -= 1 / 60) {
-      const h = Math.min(left, 1 / 60);
-      G.v -= 9.81 * h;
-      g.position.y = Math.max(0.035, g.position.y + G.v * h);
-      _v1.set(0, 0, -1).applyQuaternion(g.quaternion); // where the barrel points: it lands lying along that
-      _q.setFromEuler(_eLie.set(0, Math.atan2(-_v1.x, -_v1.z), G.side * Math.PI / 2, 'YXZ'));
-      g.quaternion.slerp(_q, Math.min(1, h * 5));
-      g.position.addScaledVector(_v1.setY(0), G.slide * h); // a little skid forwards as it drops
-      if (g.position.y <= 0.035) { G.v = 0; G.slide *= Math.max(0, 1 - h * 8); }
+    const G = this.gunDrop, g = this.gun, D = this.dead;
+    if (!G || !g || G.taken) return;
+    if (!G.drop) {
+      if (g.parent !== this.gunHolder) return; // (not holding one)
+      this.root.worldToLocal(g.getWorldPosition(_v1));
+      if (D.t < 3 && D.t / D.dur < G.letGo) { (G.prev ??= new THREE.Vector3()).copy(_v1); return; }
+      // Let go: it carries on with the speed his hands had, plus the toss
+      this.root.attach(g); // (the root stays upright while the body falls, so the gun falls on its own)
+      const vel = G.toss.clone();
+      if (G.prev && dt > 1e-4) vel.add(_v1.sub(G.prev).divideScalar(dt).clampLength(0, 5));
+      G.drop = new GunDrop(g, this.root, this.f.world, { vel, spin: G.spin, avoid: G.avoid });
+      G.rootY = this.root.position.y;
+      if (D.t >= 3) { G.drop.update(10); return; } // already lying there when we first saw him
     }
-    if (g.position.y <= 0.035 && g.quaternion.angleTo(_q) < 0.02 && G.slide < 0.01) G.rest = true;
+    if (Math.abs(this.root.position.y - G.rootY) > 0.01) { G.rootY = this.root.position.y; G.drop.wake(); } // his body slid down off a ladder
+    G.drop.update(dt);
   }
+
+  // ---- loot.js: what's on him
+  // His gun, once it's left his hands and until somebody picks it up (else null)
+  get groundGun() { return this.gunDrop?.drop && !this.gunDrop.taken ? this.gun : null; }
+  takeGun() {
+    if (!this.gunDrop) return;
+    this.gunDrop.taken = true;
+    if (this.gun?.parent === this.root) this.gun.removeFromParent();
+  }
+  // Where he lies (his hips)
+  bodyCenter(out) { return this.bones[B('Hips')].getWorldPosition(out); }
 
   // Alive again (a squadmate respawning, the escort at a checkpoint): gun back in his hands
   _revive() {
@@ -902,6 +997,7 @@ export class SoldierBody {
     }
     this.gunDrop = null;
     this.dead = null;
+    this.killDir = null;
     this.root.rotation.x = 0;
     this.model.rotation.set(0, 0, 0);
   }
